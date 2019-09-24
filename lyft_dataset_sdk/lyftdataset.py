@@ -494,6 +494,7 @@ class LyftDataset:
         nsweeps: int = 1,
         out_path: str = None,
         underlay_map: bool = False,
+        pred_boxes: List = None
     ) -> None:
         return self.explorer.render_sample_data(
             sample_data_token,
@@ -504,6 +505,7 @@ class LyftDataset:
             num_sweeps=nsweeps,
             out_path=out_path,
             underlay_map=underlay_map,
+            pred_boxes=pred_boxes
         )
 
     def render_annotation(
@@ -557,11 +559,49 @@ class LyftDatasetExplorer:
 
         """
         if "bicycle" in category_name or "motorcycle" in category_name:
-            return 255, 61, 99  # Red
-        elif "vehicle" in category_name or category_name in ["bus", "car", "construction_vehicle", "trailer", "truck"]:
+            return 0, 255, 0  # Red
+        elif "bus" in category_name:
+            return 255, 255, 0  #
+        elif "truck" in category_name:
+            return 0, 255, 255  #
+        elif "other_vehicle" in category_name:
+            return 255, 0, 255  #
+        elif "emergency_vehicle" in category_name:
+            return 255, 100, 100  #
+        elif "car" in category_name:
             return 255, 158, 0  # Orange
         elif "pedestrian" in category_name:
             return 0, 0, 230  # Blue
+        elif "cone" in category_name or "barrier" in category_name:
+            return 0, 0, 0  # Black
+        else:
+            return 255, 0, 255  # Magenta
+
+    @staticmethod
+    def get_pred_color(category_name: str) -> Tuple[int, int, int]:
+        """Provides the default colors based on the category names.
+        This method works for the general Lyft Dataset categories, as well as the Lyft Dataset detection categories.
+
+        Args:
+            category_name:
+
+        Returns:
+
+        """
+        if "bicycle" in category_name or "motorcycle" in category_name:
+            return 0, 100, 0  # Red
+        elif "bus" in category_name:
+            return 100, 100, 0  #
+        elif "truck" in category_name:
+            return 0, 100, 100  #
+        elif "other_vehicle" in category_name:
+            return 100, 0, 100  #
+        elif "emergency_vehicle" in category_name:
+            return 100, 30, 30  #
+        elif "car" in category_name:
+            return 50, 50, 0  # Orange
+        elif "pedestrian" in category_name:
+            return 0, 0, 100  # Blue
         elif "cone" in category_name or "barrier" in category_name:
             return 0, 0, 0  # Black
         else:
@@ -878,6 +918,7 @@ class LyftDatasetExplorer:
         num_sweeps: int = 1,
         out_path: str = None,
         underlay_map: bool = False,
+        pred_boxes: List = None
     ):
         """Render sample data onto axis.
 
@@ -890,6 +931,7 @@ class LyftDatasetExplorer:
             num_sweeps: Number of sweeps for lidar and radar.
             out_path: Optional path to save the rendered figure to disk.
             underlay_map: When set to true, LIDAR data is plotted onto the map. This can be slow.
+            pred_boxes: List of predicted boxes
 
         """
 
@@ -950,6 +992,27 @@ class LyftDatasetExplorer:
                 for box in boxes:
                     c = np.array(self.get_color(box.name)) / 255.0
                     box.render(ax, view=np.eye(4), colors=(c, c, c))
+            flat_vehicle_coordinates = True
+            if not pred_boxes is None:
+                for box in pred_boxes:
+                    if flat_vehicle_coordinates:
+                        # Move box to ego vehicle coord system parallel to world z plane
+                        ypr = Quaternion(pose_record["rotation"]).yaw_pitch_roll
+                        yaw = ypr[0]
+
+                        box.translate(-np.array(pose_record["translation"]))
+                        box.rotate(Quaternion(scalar=np.cos(yaw / 2), vector=[0, 0, np.sin(yaw / 2)]).inverse)
+
+                    else:
+                        # Move box to ego vehicle coord system
+                        box.translate(-np.array(pose_record["translation"]))
+                        box.rotate(Quaternion(pose_record["rotation"]).inverse)
+
+                        #  Move box to sensor coord system
+                        box.translate(-np.array(cs_record["translation"]))
+                        box.rotate(Quaternion(cs_record["rotation"]).inverse)
+                    c = np.array(self.get_pred_color(box.name)) / 255.0
+                    box.render(ax, view=np.eye(4), colors=(c, c, c), linewidth=1)
 
             # Limit visible range.
             ax.set_xlim(-axes_limit, axes_limit)
@@ -1047,7 +1110,7 @@ class LyftDatasetExplorer:
         if out_path is not None:
             num = len([name for name in os.listdir(out_path)])
             out_path = out_path + str(num).zfill(5) + "_" + sample_data_token + ".png"
-            plt.savefig(out_path)
+            plt.savefig(out_path, dpi=300)
             plt.close("all")
             return out_path
 
