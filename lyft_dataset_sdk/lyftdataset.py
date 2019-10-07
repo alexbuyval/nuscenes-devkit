@@ -539,6 +539,208 @@ class LyftDataset:
     def render_egoposes_on_map(self, log_location: str, scene_tokens: List = None, out_path: str = None) -> None:
         self.explorer.render_egoposes_on_map(log_location, scene_tokens, out_path=out_path)
 
+    def render_sample_3d_interactive(
+            self,
+            sample_id: str,
+            pred_boxes: List = None,
+            render_sample: bool = True,
+            render_gt: bool = False
+    ) -> None:
+        """Render 3D visualization of the sample using plotly
+        Args:
+            sample_id: Unique sample identifier.
+            render_sample: call self.render_sample (Render all LIDAR and camera sample_data in sample along with annotations.)
+        """
+        import pandas as pd
+        import plotly.graph_objects as go
+
+        sample = self.get('sample', sample_id)
+        sample_data = self.get(
+            'sample_data',
+            sample['data']['LIDAR_TOP']
+        )
+        pc = LidarPointCloud.from_file(
+            Path(os.path.join(str(self.data_path),
+                              sample_data['filename']))
+        )
+        _, boxes, _ = self.get_sample_data(
+            sample['data']['LIDAR_TOP'], flat_vehicle_coordinates=False
+        )
+
+        if render_sample:
+            self.render_sample(sample_id)
+
+        df_tmp = pd.DataFrame(pc.points[:3, :].T, columns=['x', 'y', 'z'])
+        df_tmp['norm'] = np.sqrt(np.power(df_tmp[['x', 'y', 'z']].values, 2).sum(axis=1))
+        scatter = go.Scatter3d(
+            x=df_tmp['x'],
+            y=df_tmp['y'],
+            z=df_tmp['z'],
+            mode='markers',
+            marker=dict(
+                size=1,
+                color=df_tmp['norm'],
+                opacity=0.8
+            )
+        )
+
+        x_lines = []
+        y_lines = []
+        z_lines = []
+
+        x_gt_lines = []
+        y_gt_lines = []
+        z_gt_lines = []
+
+        def f_lines_add_nones():
+            x_lines.append(None)
+            y_lines.append(None)
+            z_lines.append(None)
+
+        def f_gt_lines_add_nones():
+            x_gt_lines.append(None)
+            y_gt_lines.append(None)
+            z_gt_lines.append(None)
+
+        ixs_box_0 = [0, 1, 2, 3, 0]
+        ixs_box_1 = [4, 5, 6, 7, 4]
+
+        cs_record = self.get("calibrated_sensor", sample_data["calibrated_sensor_token"])
+        sensor_record = self.get("sensor", cs_record["sensor_token"])
+        pose_record = self.get("ego_pose", sample_data["ego_pose_token"])
+
+        for box in pred_boxes:
+
+            # Move box to ego vehicle coord system
+            box.translate(-np.array(pose_record["translation"]))
+            box.rotate(Quaternion(pose_record["rotation"]).inverse)
+
+            #  Move box to sensor coord system
+            box.translate(-np.array(cs_record["translation"]))
+            box.rotate(Quaternion(cs_record["rotation"]).inverse)
+
+            points = view_points(box.corners(), view=np.eye(3), normalize=False)
+            x_lines.extend(points[0, ixs_box_0])
+            y_lines.extend(points[1, ixs_box_0])
+            z_lines.extend(points[2, ixs_box_0])
+            f_lines_add_nones()
+            x_lines.extend(points[0, ixs_box_1])
+            y_lines.extend(points[1, ixs_box_1])
+            z_lines.extend(points[2, ixs_box_1])
+            f_lines_add_nones()
+            for i in range(4):
+                x_lines.extend(points[0, [ixs_box_0[i], ixs_box_1[i]]])
+                y_lines.extend(points[1, [ixs_box_0[i], ixs_box_1[i]]])
+                z_lines.extend(points[2, [ixs_box_0[i], ixs_box_1[i]]])
+                f_lines_add_nones()
+        if render_gt:
+            for box in boxes:
+                points = view_points(box.corners(), view=np.eye(3), normalize=False)
+                x_gt_lines.extend(points[0, ixs_box_0])
+                y_gt_lines.extend(points[1, ixs_box_0])
+                z_gt_lines.extend(points[2, ixs_box_0])
+                f_gt_lines_add_nones()
+                x_gt_lines.extend(points[0, ixs_box_1])
+                y_gt_lines.extend(points[1, ixs_box_1])
+                z_gt_lines.extend(points[2, ixs_box_1])
+                f_gt_lines_add_nones()
+                for i in range(4):
+                    x_gt_lines.extend(points[0, [ixs_box_0[i], ixs_box_1[i]]])
+                    y_gt_lines.extend(points[1, [ixs_box_0[i], ixs_box_1[i]]])
+                    z_gt_lines.extend(points[2, [ixs_box_0[i], ixs_box_1[i]]])
+                    f_gt_lines_add_nones()
+
+        lines = go.Scatter3d(
+            x=x_lines,
+            y=y_lines,
+            z=z_lines,
+            mode='lines',
+            name='lines',
+            line=go.scatter3d.Line(
+                color="blue"
+            )
+        )
+
+        gt_lines = go.Scatter3d(
+            x=x_gt_lines,
+            y=y_gt_lines,
+            z=z_gt_lines,
+            mode='lines',
+            name='lines',
+            line=go.scatter3d.Line(
+                color="red"
+            )
+        )
+
+        fig = go.Figure(data=[scatter, lines, gt_lines])
+        fig.update_layout(scene_aspectmode='data')
+        fig.show()
+
+    def render_pcl_box_3d_interactive(
+            self,
+            pcl,
+            box,
+    ) -> None:
+        """Render 3D visualization of the sample using plotly
+        Args:
+            sample_id: Unique sample identifier.
+            render_sample: call self.render_sample (Render all LIDAR and camera sample_data in sample along with annotations.)
+        """
+        import pandas as pd
+        import plotly.graph_objects as go
+
+        df_tmp = pd.DataFrame(pcl.T, columns=['x', 'y', 'z'])
+        df_tmp['norm'] = np.sqrt(np.power(df_tmp[['x', 'y', 'z']].values, 2).sum(axis=1))
+        scatter = go.Scatter3d(
+            x=df_tmp['x'],
+            y=df_tmp['y'],
+            z=df_tmp['z'],
+            mode='markers',
+            marker=dict(
+                size=1,
+                color=df_tmp['norm'],
+                opacity=0.8
+            )
+        )
+
+        x_lines = []
+        y_lines = []
+        z_lines = []
+
+        def f_lines_add_nones():
+            x_lines.append(None)
+            y_lines.append(None)
+            z_lines.append(None)
+
+        ixs_box_0 = [0, 1, 2, 3, 0]
+        ixs_box_1 = [4, 5, 6, 7, 4]
+
+        points = view_points(box.corners(), view=np.eye(3), normalize=False)
+        x_lines.extend(points[0, ixs_box_0])
+        y_lines.extend(points[1, ixs_box_0])
+        z_lines.extend(points[2, ixs_box_0])
+        f_lines_add_nones()
+        x_lines.extend(points[0, ixs_box_1])
+        y_lines.extend(points[1, ixs_box_1])
+        z_lines.extend(points[2, ixs_box_1])
+        f_lines_add_nones()
+        for i in range(4):
+            x_lines.extend(points[0, [ixs_box_0[i], ixs_box_1[i]]])
+            y_lines.extend(points[1, [ixs_box_0[i], ixs_box_1[i]]])
+            z_lines.extend(points[2, [ixs_box_0[i], ixs_box_1[i]]])
+            f_lines_add_nones()
+
+        lines = go.Scatter3d(
+            x=x_lines,
+            y=y_lines,
+            z=z_lines,
+            mode='lines',
+            name='lines'
+        )
+
+        fig = go.Figure(data=[scatter, lines])
+        fig.update_layout(scene_aspectmode='data')
+        fig.show()
 
 class LyftDatasetExplorer:
     """Helper class to list and visualize Lyft Dataset data. These are meant to serve as tutorials and templates for
@@ -559,15 +761,15 @@ class LyftDatasetExplorer:
 
         """
         if "bicycle" in category_name or "motorcycle" in category_name:
-            return 0, 255, 0  # Red
+            return 0, 255, 0  # Green
         elif "bus" in category_name:
-            return 255, 255, 0  #
+            return 255, 255, 0  # Yellow
         elif "truck" in category_name:
             return 0, 255, 255  #
         elif "other_vehicle" in category_name:
             return 255, 0, 255  #
         elif "emergency_vehicle" in category_name:
-            return 255, 100, 100  #
+            return 255, 0, 0  #
         elif "car" in category_name:
             return 255, 158, 0  # Orange
         elif "pedestrian" in category_name:
@@ -589,19 +791,19 @@ class LyftDatasetExplorer:
 
         """
         if "bicycle" in category_name or "motorcycle" in category_name:
-            return 0, 100, 0  # Red
+            return 0, 150, 0  # Red
         elif "bus" in category_name:
-            return 100, 100, 0  #
+            return 150, 150, 0  #
         elif "truck" in category_name:
-            return 0, 100, 100  #
+            return 0, 150, 150  #
         elif "other_vehicle" in category_name:
-            return 100, 0, 100  #
+            return 150, 0, 150  #
         elif "emergency_vehicle" in category_name:
-            return 100, 30, 30  #
+            return 150, 0, 0  #
         elif "car" in category_name:
             return 50, 50, 0  # Orange
         elif "pedestrian" in category_name:
-            return 0, 0, 100  # Blue
+            return 0, 0, 150  # Blue
         elif "cone" in category_name or "barrier" in category_name:
             return 0, 0, 0  # Black
         else:
@@ -735,6 +937,7 @@ class LyftDatasetExplorer:
         poserecord = self.lyftd.get("ego_pose", pointsensor["ego_pose_token"])
         pc.rotate(Quaternion(poserecord["rotation"]).rotation_matrix)
         pc.translate(np.array(poserecord["translation"]))
+        lidar_points = np.copy(pc.points[:3, :])
 
         # Third step: transform into the ego vehicle frame for the timestamp of the image.
         poserecord = self.lyftd.get("ego_pose", cam["ego_pose_token"])
@@ -749,13 +952,12 @@ class LyftDatasetExplorer:
         # Fifth step: actually take a "picture" of the point cloud.
         # Grab the depths (camera frame z axis points away from the camera).
         depths = pc.points[2, :]
-
         # Retrieve the color from the depth.
         coloring = depths
 
         # Take the actual picture (matrix multiplication with camera-matrix + renormalization).
         points = view_points(pc.points[:3, :], np.array(cs_record["camera_intrinsic"]), normalize=True)
-
+        all_points = points
         # Remove points that are either outside or behind the camera. Leave a margin of 1 pixel for aesthetic reasons.
         mask = np.ones(depths.shape[0], dtype=bool)
         mask = np.logical_and(mask, depths > 0)
@@ -766,7 +968,7 @@ class LyftDatasetExplorer:
         points = points[:, mask]
         coloring = coloring[mask]
 
-        return points, coloring, im
+        return points, coloring, im, all_points, lidar_points, mask, depths
 
     def render_pointcloud_in_image(
         self,
@@ -794,7 +996,7 @@ class LyftDatasetExplorer:
         pointsensor_token = sample_record["data"][pointsensor_channel]
         camera_token = sample_record["data"][camera_channel]
 
-        points, coloring, im = self.map_pointcloud_to_image(pointsensor_token, camera_token)
+        points, coloring, im, _, _, _ = self.map_pointcloud_to_image(pointsensor_token, camera_token)
         plt.figure(figsize=(9, 16))
         plt.imshow(im)
         plt.scatter(points[0, :], points[1, :], c=coloring, s=dot_size)

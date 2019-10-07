@@ -309,7 +309,10 @@ def recall_precision(gt, predictions, iou_threshold):
     fp = np.cumsum(fp, axis=0)
     tp = np.cumsum(tp, axis=0)
 
-    recalls = tp / float(num_gts)
+    if num_gts==0:
+        recalls = np.zeros_like(tp)
+    else:
+        recalls = tp / float(num_gts)
 
     assert np.all(0 <= recalls) & np.all(recalls <= 1)
 
