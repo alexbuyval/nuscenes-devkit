@@ -948,6 +948,7 @@ class LyftDatasetExplorer:
         cs_record = self.lyftd.get("calibrated_sensor", cam["calibrated_sensor_token"])
         pc.translate(-np.array(cs_record["translation"]))
         pc.rotate(Quaternion(cs_record["rotation"]).rotation_matrix.T)
+        lidar_points_in_cam = np.copy(pc.points[:3, :])
 
         # Fifth step: actually take a "picture" of the point cloud.
         # Grab the depths (camera frame z axis points away from the camera).
@@ -968,7 +969,7 @@ class LyftDatasetExplorer:
         points = points[:, mask]
         coloring = coloring[mask]
 
-        return points, coloring, im, all_points, lidar_points, mask, depths
+        return points, coloring, im, all_points, lidar_points, mask, depths, lidar_points_in_cam
 
     def render_pointcloud_in_image(
         self,

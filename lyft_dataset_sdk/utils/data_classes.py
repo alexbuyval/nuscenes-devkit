@@ -283,6 +283,8 @@ class LidarPointCloud(PointCloud):
         assert file_name.suffix == ".bin", "Unsupported filetype {}".format(file_name)
 
         scan = np.fromfile(str(file_name), dtype=np.float32)
+        if scan.shape[0] % 5 != 0:
+            return None
         points = scan.reshape((-1, 5))[:, : cls.nbr_dims()]
         return cls(points.T)
 
